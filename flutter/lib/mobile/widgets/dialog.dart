@@ -1,52 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/common/widgets/setting_widgets.dart';
+import 'package:flutter_hbb/common/widgets/toolbar.dart';
 import 'package:get/get.dart';
 
 import '../../common.dart';
-import '../../models/model.dart';
 import '../../models/platform_model.dart';
 
-void clientClose(String id, OverlayDialogManager dialogManager) {
-  msgBox(id, 'info', 'Close', 'Are you sure to close the connection?', '',
-      dialogManager);
-}
-
-void showSuccess() {
+void _showSuccess() {
   showToast(translate("Successful"));
 }
 
-void showError() {
+void _showError() {
   showToast(translate("Error"));
-}
-
-void showRestartRemoteDevice(
-    PeerInfo pi, String id, OverlayDialogManager dialogManager) async {
-  final res =
-      await dialogManager.show<bool>((setState, close) => CustomAlertDialog(
-            title: Row(children: [
-              Icon(Icons.warning_rounded, color: Colors.redAccent, size: 28),
-              Text(translate("Restart Remote Device")).paddingOnly(left: 10),
-            ]),
-            content: Text(
-                "${translate('Are you sure you want to restart')} \n${pi.username}@${pi.hostname}($id) ?"),
-            actions: [
-              dialogButton(
-                "Cancel",
-                icon: Icon(Icons.close_rounded),
-                onPressed: close,
-                isOutline: true,
-              ),
-              dialogButton(
-                "OK",
-                icon: Icon(Icons.done_rounded),
-                onPressed: () => close(true),
-              ),
-            ],
-            onCancel: close,
-            onSubmit: () => close(true),
-          ));
-  if (res == true) bind.sessionRestartRemoteDevice(id: id);
 }
 
 void setPermanentPasswordDialog(OverlayDialogManager dialogManager) async {
@@ -55,16 +22,16 @@ void setPermanentPasswordDialog(OverlayDialogManager dialogManager) async {
   final p1 = TextEditingController(text: pw);
   var validateLength = false;
   var validateSame = false;
-  dialogManager.show((setState, close) {
+  dialogManager.show((setState, close, context) {
     submit() async {
       close();
       dialogManager.showLoading(translate("Waiting"));
       if (await gFFI.serverModel.setPermanentPassword(p0.text)) {
         dialogManager.dismissAll();
-        showSuccess();
+        _showSuccess();
       } else {
         dialogManager.dismissAll();
-        showError();
+        _showError();
       }
     }
 
@@ -99,7 +66,7 @@ void setPermanentPasswordDialog(OverlayDialogManager dialogManager) async {
                     ? null
                     : translate('Too short, at least 6 characters.');
               },
-            ),
+            ).workaroundFreezeLinuxMint(),
             TextFormField(
               obscureText: true,
               keyboardType: TextInputType.visiblePassword,
@@ -118,7 +85,7 @@ void setPermanentPasswordDialog(OverlayDialogManager dialogManager) async {
                     ? null
                     : translate('The confirmation is not identical.');
               },
-            ),
+            ).workaroundFreezeLinuxMint(),
           ])),
       onCancel: close,
       onSubmit: (validateLength && validateSame) ? submit : null,
@@ -146,7 +113,7 @@ void setTemporaryPasswordLengthDialog(
   var index = lengths.indexOf(length);
   if (index < 0) index = 0;
   length = lengths[index];
-  dialogManager.show((setState, close) {
+  dialogManager.show((setState, close, context) {
     setLength(newValue) {
       final oldValue = length;
       if (oldValue == newValue) return;
@@ -157,199 +124,160 @@ void setTemporaryPasswordLengthDialog(
       bind.mainUpdateTemporaryPassword();
       Future.delayed(Duration(milliseconds: 200), () {
         close();
-        showSuccess();
+        _showSuccess();
       });
     }
 
     return CustomAlertDialog(
       title: Text(translate("Set one-time password length")),
-      content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children:
-              lengths.map((e) => getRadio(e, e, length, setLength)).toList()),
-      actions: [],
-      contentPadding: 14,
+      content: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: lengths
+              .map(
+                (value) => Row(
+                  children: [
+                    Text(value),
+                    Radio(
+                        value: value, groupValue: length, onChanged: setLength),
+                  ],
+                ),
+              )
+              .toList()),
     );
   }, backDismiss: true, clickMaskDismiss: true);
 }
 
-void enterPasswordDialog(String id, OverlayDialogManager dialogManager) async {
-  final controller = TextEditingController();
-  var remember = await bind.sessionGetRemember(id: id) ?? false;
-  dialogManager.dismissAll();
-  dialogManager.show((setState, close) {
-    cancel() {
-      close();
-      closeConnection();
-    }
-
-    submit() {
-      var text = controller.text.trim();
-      if (text == '') return;
-      gFFI.login(id, text, remember);
-      close();
-      dialogManager.showLoading(translate('Logging in...'),
-          onCancel: closeConnection);
-    }
-
-    return CustomAlertDialog(
-      title: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.password_rounded, color: MyTheme.accent),
-          Text(translate('Password Required')).paddingOnly(left: 10),
-        ],
-      ),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        PasswordWidget(controller: controller),
-        CheckboxListTile(
-          contentPadding: const EdgeInsets.all(0),
-          dense: true,
-          controlAffinity: ListTileControlAffinity.leading,
-          title: Text(
-            translate('Remember password'),
-          ),
-          value: remember,
-          onChanged: (v) {
-            if (v != null) {
-              setState(() => remember = v);
-            }
-          },
-        ),
-      ]),
-      actions: [
-        dialogButton(
-          'Cancel',
-          icon: Icon(Icons.close_rounded),
-          onPressed: cancel,
-          isOutline: true,
-        ),
-        dialogButton(
-          'OK',
-          icon: Icon(Icons.done_rounded),
-          onPressed: submit,
-        ),
-      ],
-      onSubmit: submit,
-      onCancel: cancel,
-    );
-  });
-}
-
-void wrongPasswordDialog(
-    String id, OverlayDialogManager dialogManager, type, title, text) {
-  dialogManager.dismissAll();
-  dialogManager.show((setState, close) {
-    cancel() {
-      close();
-      closeConnection();
-    }
-
-    submit() {
-      enterPasswordDialog(id, dialogManager);
-    }
-
-    return CustomAlertDialog(
-        title: null,
-        content: msgboxContent(type, title, text),
-        onSubmit: submit,
-        onCancel: cancel,
-        actions: [
-          dialogButton(
-            'Cancel',
-            onPressed: cancel,
-            isOutline: true,
-          ),
-          dialogButton(
-            'Retry',
-            onPressed: submit,
-          ),
-        ]);
-  });
+void showServerSettings(OverlayDialogManager dialogManager) async {
+  Map<String, dynamic> options = {};
+  try {
+    options = jsonDecode(await bind.mainGetOptions());
+  } catch (e) {
+    print("Invalid server config: $e");
+  }
+  showServerSettingsWithValue(ServerConfig.fromOptions(options), dialogManager);
 }
 
 void showServerSettingsWithValue(
     ServerConfig serverConfig, OverlayDialogManager dialogManager) async {
-  Map<String, dynamic> oldOptions = jsonDecode(await bind.mainGetOptions());
-  final oldCfg = ServerConfig.fromOptions(oldOptions);
-
   var isInProgress = false;
   final idCtrl = TextEditingController(text: serverConfig.idServer);
   final relayCtrl = TextEditingController(text: serverConfig.relayServer);
   final apiCtrl = TextEditingController(text: serverConfig.apiServer);
   final keyCtrl = TextEditingController(text: serverConfig.key);
 
-  String? idServerMsg;
-  String? relayServerMsg;
-  String? apiServerMsg;
+  RxString idServerMsg = ''.obs;
+  RxString relayServerMsg = ''.obs;
+  RxString apiServerMsg = ''.obs;
 
-  dialogManager.show((setState, close) {
-    Future<bool> validate() async {
-      if (idCtrl.text != oldCfg.idServer) {
-        final res = await validateAsync(idCtrl.text);
-        setState(() => idServerMsg = res);
-        if (idServerMsg != null) return false;
+  final controllers = [idCtrl, relayCtrl, apiCtrl, keyCtrl];
+  final errMsgs = [
+    idServerMsg,
+    relayServerMsg,
+    apiServerMsg,
+  ];
+
+  dialogManager.show((setState, close, context) {
+    Future<bool> submit() async {
+      setState(() {
+        isInProgress = true;
+      });
+      bool ret = await setServerConfig(
+          null,
+          errMsgs,
+          ServerConfig(
+              idServer: idCtrl.text.trim(),
+              relayServer: relayCtrl.text.trim(),
+              apiServer: apiCtrl.text.trim(),
+              key: keyCtrl.text.trim()));
+      setState(() {
+        isInProgress = false;
+      });
+      return ret;
+    }
+
+    Widget buildField(
+        String label, TextEditingController controller, String errorMsg,
+        {String? Function(String?)? validator, bool autofocus = false}) {
+      if (isDesktop || isWeb) {
+        return Row(
+          children: [
+            SizedBox(
+              width: 120,
+              child: Text(label),
+            ),
+            SizedBox(width: 8),
+            Expanded(
+              child: TextFormField(
+                controller: controller,
+                decoration: InputDecoration(
+                  errorText: errorMsg.isEmpty ? null : errorMsg,
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                ),
+                validator: validator,
+                autofocus: autofocus,
+              ).workaroundFreezeLinuxMint(),
+            ),
+          ],
+        );
       }
-      if (relayCtrl.text != oldCfg.relayServer) {
-        relayServerMsg = await validateAsync(relayCtrl.text);
-        if (relayServerMsg != null) return false;
-      }
-      if (apiCtrl.text != oldCfg.apiServer) {
-        if (apiServerMsg != null) return false;
-      }
-      return true;
+
+      return TextFormField(
+        controller: controller,
+        decoration: InputDecoration(
+          labelText: label,
+          errorText: errorMsg.isEmpty ? null : errorMsg,
+        ),
+        validator: validator,
+      ).workaroundFreezeLinuxMint();
     }
 
     return CustomAlertDialog(
-      title: Text(translate('ID/Relay Server')),
-      content: Form(
-          child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                    TextFormField(
-                      controller: idCtrl,
-                      decoration: InputDecoration(
-                          labelText: translate('ID Server'),
-                          errorText: idServerMsg),
-                    )
-                  ] +
-                  (isAndroid
-                      ? [
-                          TextFormField(
-                            controller: relayCtrl,
-                            decoration: InputDecoration(
-                                labelText: translate('Relay Server'),
-                                errorText: relayServerMsg),
-                          )
-                        ]
-                      : []) +
-                  [
-                    TextFormField(
-                      controller: apiCtrl,
-                      decoration: InputDecoration(
-                        labelText: translate('API Server'),
-                      ),
-                      autovalidateMode: AutovalidateMode.onUserInteraction,
-                      validator: (v) {
-                        if (v != null && v.isNotEmpty) {
-                          if (!(v.startsWith('http://') ||
-                              v.startsWith("https://"))) {
-                            return translate("invalid_http");
-                          }
+      title: Row(
+        children: [
+          Expanded(child: Text(translate('ID/Relay Server'))),
+          ...ServerConfigImportExportWidgets(controllers, errMsgs),
+        ],
+      ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 500),
+        child: Form(
+          child: Obx(() => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  buildField(translate('ID Server'), idCtrl, idServerMsg.value,
+                      autofocus: true),
+                  SizedBox(height: 8),
+                  if (!isIOS && !isWeb) ...[
+                    buildField(translate('Relay Server'), relayCtrl,
+                        relayServerMsg.value),
+                    SizedBox(height: 8),
+                  ],
+                  buildField(
+                    translate('API Server'),
+                    apiCtrl,
+                    apiServerMsg.value,
+                    validator: (v) {
+                      if (v != null && v.isNotEmpty) {
+                        if (!(v.startsWith('http://') ||
+                            v.startsWith("https://"))) {
+                          return translate("invalid_http");
                         }
-                        return apiServerMsg;
-                      },
+                      }
+                      return null;
+                    },
+                  ),
+                  SizedBox(height: 8),
+                  buildField('Key', keyCtrl, ''),
+                  if (isInProgress)
+                    Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: LinearProgressIndicator(),
                     ),
-                    TextFormField(
-                      controller: keyCtrl,
-                      decoration: InputDecoration(
-                        labelText: 'Key',
-                      ),
-                    ),
-                    Offstage(
-                        offstage: !isInProgress,
-                        child: LinearProgressIndicator())
-                  ])),
+                ],
+              )),
+        ),
+      ),
       actions: [
         dialogButton('Cancel', onPressed: () {
           close();
@@ -357,35 +285,12 @@ void showServerSettingsWithValue(
         dialogButton(
           'OK',
           onPressed: () async {
-            setState(() {
-              idServerMsg = null;
-              relayServerMsg = null;
-              apiServerMsg = null;
-              isInProgress = true;
-            });
-            if (await validate()) {
-              if (idCtrl.text != oldCfg.idServer) {
-                if (oldCfg.idServer.isNotEmpty) {
-                  await gFFI.userModel.logOut();
-                }
-                bind.mainSetOption(
-                    key: "custom-rendezvous-server", value: idCtrl.text);
-              }
-              if (relayCtrl.text != oldCfg.relayServer) {
-                bind.mainSetOption(key: "relay-server", value: relayCtrl.text);
-              }
-              if (keyCtrl.text != oldCfg.key) {
-                bind.mainSetOption(key: "key", value: keyCtrl.text);
-              }
-              if (apiCtrl.text != oldCfg.apiServer) {
-                bind.mainSetOption(key: "api-server", value: apiCtrl.text);
-              }
+            if (await submit()) {
               close();
               showToast(translate('Successful'));
+            } else {
+              showToast(translate('Failed'));
             }
-            setState(() {
-              isInProgress = false;
-            });
           },
         ),
       ],
@@ -393,296 +298,26 @@ void showServerSettingsWithValue(
   });
 }
 
-void showWaitUacDialog(
-    String id, OverlayDialogManager dialogManager, String type) {
-  dialogManager.dismissAll();
-  dialogManager.show(
-      tag: '$id-wait-uac',
-      (setState, close) => CustomAlertDialog(
-            title: null,
-            content: msgboxContent(type, 'Wait', 'wait_accept_uac_tip'),
-          ));
-}
-
-void showRequestElevationDialog(String id, OverlayDialogManager dialogManager) {
-  RxString groupValue = ''.obs;
-  RxString errUser = ''.obs;
-  RxString errPwd = ''.obs;
-  TextEditingController userController = TextEditingController();
-  TextEditingController pwdController = TextEditingController();
-
-  void onRadioChanged(String? value) {
-    if (value != null) {
-      groupValue.value = value;
-    }
-  }
-
-  const minTextStyle = TextStyle(fontSize: 14);
-
-  var content = Obx(() => Column(children: [
-        Row(
-          children: [
-            Radio(
-                value: '',
-                groupValue: groupValue.value,
-                onChanged: onRadioChanged),
-            Expanded(
-                child:
-                    Text(translate('Ask the remote user for authentication'))),
-          ],
-        ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-                  translate(
-                      'Choose this if the remote account is administrator'),
-                  style: TextStyle(fontSize: 13))
-              .marginOnly(left: 40),
-        ).marginOnly(bottom: 15),
-        Row(
-          children: [
-            Radio(
-                value: 'logon',
-                groupValue: groupValue.value,
-                onChanged: onRadioChanged),
-            Expanded(
-              child: Text(translate(
-                  'Transmit the username and password of administrator')),
-            )
-          ],
-        ),
-        Row(
-          children: [
-            Expanded(
-                flex: 1,
-                child: Text(
-                  '${translate('Username')}:',
-                  style: minTextStyle,
-                ).marginOnly(right: 10)),
-            Expanded(
-              flex: 3,
-              child: TextField(
-                controller: userController,
-                style: minTextStyle,
-                decoration: InputDecoration(
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 15),
-                    hintText: translate('eg: admin'),
-                    errorText: errUser.isEmpty ? null : errUser.value),
-                onChanged: (s) {
-                  if (s.isNotEmpty) {
-                    errUser.value = '';
-                  }
-                },
-              ),
-            )
-          ],
-        ).marginOnly(left: 40),
-        Row(
-          children: [
-            Expanded(
-                flex: 1,
-                child: Text(
-                  '${translate('Password')}:',
-                  style: minTextStyle,
-                ).marginOnly(right: 10)),
-            Expanded(
-              flex: 3,
-              child: TextField(
-                controller: pwdController,
-                obscureText: true,
-                style: minTextStyle,
-                decoration: InputDecoration(
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 15),
-                    errorText: errPwd.isEmpty ? null : errPwd.value),
-                onChanged: (s) {
-                  if (s.isNotEmpty) {
-                    errPwd.value = '';
-                  }
-                },
-              ),
-            ),
-          ],
-        ).marginOnly(left: 40),
-        Align(
-            alignment: Alignment.centerLeft,
-            child: Text(translate('still_click_uac_tip'),
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold))
-                .marginOnly(top: 20)),
-      ]));
-
-  dialogManager.dismissAll();
-  dialogManager.show(tag: '$id-request-elevation', (setState, close) {
-    void submit() {
-      if (groupValue.value == 'logon') {
-        if (userController.text.isEmpty) {
-          errUser.value = translate('Empty Username');
-          return;
-        }
-        if (pwdController.text.isEmpty) {
-          errPwd.value = translate('Empty Password');
-          return;
-        }
-        bind.sessionElevateWithLogon(
-            id: id,
-            username: userController.text,
-            password: pwdController.text);
-      } else {
-        bind.sessionElevateDirect(id: id);
-      }
-    }
-
-    return CustomAlertDialog(
-      title: Text(translate('Request Elevation')),
-      content: content,
-      actions: [
-        dialogButton('Cancel', onPressed: close, isOutline: true),
-        dialogButton('OK', onPressed: submit),
-      ],
-      onSubmit: submit,
-      onCancel: close,
-    );
-  });
-}
-
-void showOnBlockDialog(
-  String id,
-  String type,
-  String title,
-  String text,
+void setPrivacyModeDialog(
   OverlayDialogManager dialogManager,
-) {
-  if (dialogManager.existing('$id-wait-uac') ||
-      dialogManager.existing('$id-request-elevation')) {
-    return;
-  }
-  dialogManager.show(tag: '$id-$type', (setState, close) {
-    void submit() {
-      close();
-      showRequestElevationDialog(id, dialogManager);
-    }
-
-    return CustomAlertDialog(
-      title: null,
-      content: msgboxContent(type, title,
-          "${translate(text)}${type.contains('uac') ? '\n' : '\n\n'}${translate('request_elevation_tip')}"),
-      actions: [
-        dialogButton('Wait', onPressed: close, isOutline: true),
-        dialogButton('Request Elevation', onPressed: submit),
-      ],
-      onSubmit: submit,
-      onCancel: close,
-    );
-  });
-}
-
-void showElevationError(String id, String type, String title, String text,
-    OverlayDialogManager dialogManager) {
-  dialogManager.show(tag: '$id-$type', (setState, close) {
-    void submit() {
-      close();
-      showRequestElevationDialog(id, dialogManager);
-    }
-
-    return CustomAlertDialog(
-      title: null,
-      content: msgboxContent(type, title, text),
-      actions: [
-        dialogButton('Cancel', onPressed: () {
-          close();
-        }, isOutline: true),
-        dialogButton('Retry', onPressed: submit),
-      ],
-      onSubmit: submit,
-      onCancel: close,
-    );
-  });
-}
-
-void showWaitAcceptDialog(String id, String type, String title, String text,
-    OverlayDialogManager dialogManager) {
+  List<TToggleMenu> privacyModeList,
+  RxString privacyModeState,
+) async {
   dialogManager.dismissAll();
-  dialogManager.show((setState, close) {
-    onCancel() {
-      closeConnection();
-    }
-
+  dialogManager.show((setState, close, context) {
     return CustomAlertDialog(
-      title: null,
-      content: msgboxContent(type, title, text),
-      actions: [
-        dialogButton('Cancel', onPressed: onCancel, isOutline: true),
-      ],
-      onCancel: onCancel,
+      title: Text(translate('Privacy mode')),
+      content: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: privacyModeList
+              .map((value) => CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    title: value.child,
+                    value: value.value,
+                    onChanged: value.onChanged,
+                  ))
+              .toList()),
     );
-  });
-}
-
-Future<String?> validateAsync(String value) async {
-  value = value.trim();
-  if (value.isEmpty) {
-    return null;
-  }
-  final res = await bind.mainTestIfValidServer(server: value);
-  return res.isEmpty ? null : res;
-}
-
-class PasswordWidget extends StatefulWidget {
-  PasswordWidget({Key? key, required this.controller, this.autoFocus = true})
-      : super(key: key);
-
-  final TextEditingController controller;
-  final bool autoFocus;
-
-  @override
-  State<PasswordWidget> createState() => _PasswordWidgetState();
-}
-
-class _PasswordWidgetState extends State<PasswordWidget> {
-  bool _passwordVisible = false;
-  final _focusNode = FocusNode();
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.autoFocus) {
-      Timer(Duration(milliseconds: 50), () => _focusNode.requestFocus());
-    }
-  }
-
-  @override
-  void dispose() {
-    _focusNode.unfocus();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      focusNode: _focusNode,
-      controller: widget.controller,
-      obscureText: !_passwordVisible,
-      //This will obscure text dynamically
-      keyboardType: TextInputType.visiblePassword,
-      decoration: InputDecoration(
-        labelText: translate('Password'),
-        hintText: translate('Enter your password'),
-        // Here is key idea
-        suffixIcon: IconButton(
-          icon: Icon(
-              // Based on passwordVisible state choose the icon
-              _passwordVisible ? Icons.visibility : Icons.visibility_off,
-              color: MyTheme.lightTheme.primaryColor),
-          onPressed: () {
-            // Update the state i.e. toggle the state of passwordVisible variable
-            setState(() {
-              _passwordVisible = !_passwordVisible;
-            });
-          },
-        ),
-      ),
-    );
-  }
+  }, backDismiss: true, clickMaskDismiss: true);
 }
